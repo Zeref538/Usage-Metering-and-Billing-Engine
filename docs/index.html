@@ -1,0 +1,1101 @@
+<!doctype html>
+<html lang="en" data-view="plain">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Count Once: usage metering and billing</title>
+<meta name="description" content="Case study: a backend that meters API usage exactly once under retries, answers over-quota requests with honest 402 or 429, prices AI tokens in integer money and syncs plans from verified Stripe webhooks. 30 tests, 5 of 5 acceptance probes.">
+<meta property="og:type" content="website">
+<meta property="og:title" content="Count Once: usage metering and billing">
+<meta property="og:description" content="Case study: a backend that meters API usage exactly once under retries, answers over-quota requests with honest 402 or 429, prices AI tokens in integer money and syncs plans from verified Stripe webhooks. 30 tests, 5 of 5 acceptance probes.">
+<link rel="canonical" href="https://zeref538.github.io/Usage-Metering-and-Billing-Engine/">
+<meta property="og:url" content="https://zeref538.github.io/Usage-Metering-and-Billing-Engine/">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ccircle cx='8' cy='8' r='7' fill='%2317703f'/%3E%3C/svg%3E">
+<style>
+  /* Self-hosted (SIL OFL, fonts/OFL.txt): no request to Google Fonts. */
+  @font-face { font-family: "Schibsted Grotesk"; font-weight: 400; font-display: swap;
+    src: url("fonts/schibsted-grotesk-latin-400-normal.woff2") format("woff2"); }
+  @font-face { font-family: "Schibsted Grotesk"; font-weight: 500; font-display: swap;
+    src: url("fonts/schibsted-grotesk-latin-500-normal.woff2") format("woff2"); }
+  @font-face { font-family: "Newsreader"; font-style: italic; font-weight: 400; font-display: swap;
+    src: url("fonts/newsreader-latin-400-italic.woff2") format("woff2"); }
+  @font-face { font-family: "Schibsted Grotesk"; font-weight: 600; font-display: swap;
+    src: url("fonts/schibsted-grotesk-latin-600-normal.woff2") format("woff2"); }
+  @font-face { font-family: "Sora"; font-weight: 700; font-display: swap;
+    src: url("fonts/sora-latin-700-normal.woff2") format("woff2"); } /* logo only, SIL OFL */
+  @font-face { font-family: "Schibsted Grotesk"; font-weight: 700; font-display: swap;
+    src: url("fonts/schibsted-grotesk-latin-700-normal.woff2") format("woff2"); }
+  /* Fix First: the shared case-study design (Portfolio/BRAND.md), ported
+     from LiitLLM's template.html. One project colour, --proj (blue), marks
+     the model, the data and anything the reader can touch; --tide (grey)
+     marks the rule and the control. Nothing else gets a colour. */
+  :root {
+    color-scheme: light;
+    --paper: #f5f5f4; --card: #fafaf9; --sunk: #e7e5e4;
+    --ink: #1c1917; --ink-2: #57534e; --ink-3: #6b645f;
+    --rule: #d6d3d1; --rule-2: #a8a29e;
+    --proj: #17703f; --tide: #808080; --switch: #000000;
+    --ash: #17703f; --good: #000000; --track: #ececec;
+    --proj-w: #dcefe3; --tide-w: #ececec; --sw-w: #e5e5e5;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:where(:not([data-theme="light"])) {
+      color-scheme: dark;
+    --paper: #000000; --card: #141414; --sunk: #1c1c1c;
+    --ink: #ffffff; --ink-2: #c8c8c8; --ink-3: #8f8f8f;
+    --rule: #262626; --rule-2: #3a3a3a;
+    --proj: #34c26f; --tide: #8a8a8a; --switch: #ffffff;
+    --ash: #34c26f; --good: #ffffff; --track: #222222;
+    --proj-w: #0b2a18; --tide-w: #262626; --sw-w: #262626;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --paper: #000000; --card: #141414; --sunk: #1c1c1c;
+    --ink: #ffffff; --ink-2: #c8c8c8; --ink-3: #8f8f8f;
+    --rule: #262626; --rule-2: #3a3a3a;
+    --proj: #34c26f; --tide: #8a8a8a; --switch: #ffffff;
+    --ash: #34c26f; --good: #ffffff; --track: #222222;
+    --proj-w: #0b2a18; --tide-w: #262626; --sw-w: #262626;
+  }
+
+  :root {
+    --sans: "Schibsted Grotesk", system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    --mono: ui-monospace, "Cascadia Mono", "SF Mono", Menlo, Consolas, monospace;
+  }
+
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+    *, *::before, *::after { animation-duration: .001ms !important; transition-duration: .001ms !important; }
+  }
+  body {
+    margin: 0; background: var(--paper); color: var(--ink);
+    font-family: var(--sans); font-size: 16.5px; line-height: 1.66;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 800px; margin: 0 auto; padding: 0 26px; }
+  @media (max-width: 560px) { .wrap { padding: 0 17px; } }
+
+  a { color: var(--switch); text-underline-offset: 2px; }
+  a:focus-visible, button:focus-visible, [contenteditable]:focus-visible {
+    outline: 2px solid var(--switch); outline-offset: 2px; border-radius: 3px;
+  }
+
+  /* ---------------- sticky bar ---------------- */
+  .bar {
+    position: sticky; top: 0; z-index: 40;
+    background: color-mix(in srgb, var(--paper) 88%, transparent);
+    backdrop-filter: blur(10px);
+    border-bottom: 1px solid var(--rule);
+  }
+  .bar .wrap { display: flex; align-items: center; gap: 12px; height: 54px; }
+  .brand {
+    font-weight: 800; letter-spacing: -.02em; margin-right: auto;
+    font-size: 15.5px;
+  }
+  .brand span { color: var(--switch); }
+  .seg {
+    display: inline-flex; border: 1px solid var(--rule-2); border-radius: 999px;
+    overflow: hidden; background: var(--card);
+  }
+  .seg button {
+    font: inherit; font-size: 12.5px; font-weight: 600;
+    padding: 5px 12px; border: 0; background: transparent; color: var(--ink-3);
+    cursor: pointer; white-space: nowrap;
+  }
+  .seg button[aria-pressed="true"] { background: var(--ink); color: var(--paper); }
+  .iconbtn {
+    font: inherit; width: 32px; height: 32px; border-radius: 999px;
+    border: 1px solid var(--rule-2); background: var(--card); color: var(--ink-2);
+    cursor: pointer; line-height: 1;
+  }
+  @media (max-width: 480px) { .seg button { padding: 5px 9px; font-size: 11.5px; } }
+
+  /* ---------------- type ---------------- */
+  h1 {
+    font-size: clamp(30px, 6.2vw, 47px); line-height: 1.06;
+    letter-spacing: -.033em; font-weight: 830; margin: 0 0 14px;
+  }
+  h2 {
+    font-size: clamp(21px, 3.4vw, 27px); line-height: 1.2;
+    letter-spacing: -.022em; font-weight: 780; margin: 0 0 16px;
+  }
+  h3 {
+    font-size: 16px; font-weight: 730; letter-spacing: -.008em;
+    margin: 32px 0 8px;
+  }
+  p { margin: 0 0 16px; }
+  .kicker {
+    font-family: var(--mono); font-size: 11px; font-weight: 600;
+    letter-spacing: .15em; text-transform: uppercase; color: var(--ink-3);
+    margin: 0 0 8px;
+  }
+  .lede { font-size: 18.5px; color: var(--ink-2); }
+  section { padding: 64px 0; border-top: 1px solid var(--rule); }
+  @media (max-width: 620px) { section { padding: 48px 0; } }
+  section:first-of-type { border-top: 0; }
+  .muted { color: var(--ink-3); }
+  .small { font-size: 14px; }
+  b, strong { font-weight: 700; }
+
+  /* ---------------- hero ---------------- */
+  .hero { padding: 64px 0 48px; }
+
+  /* ---------------- the scorer widget ---------------- */
+  .scorer {
+    background: var(--card); border: 2px solid var(--ink);
+    border-radius: 13px; overflow: hidden;
+  }
+  .scorer-head {
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    padding: 12px 16px; border-bottom: 1px solid var(--rule);
+    background: var(--sunk);
+  }
+  .scorer-head .kicker { margin: 0; }
+  .chips { margin-left: auto; display: flex; gap: 6px; flex-wrap: wrap; }
+  .chip {
+    font: inherit; font-size: 11.5px; font-weight: 600; cursor: pointer;
+    padding: 3px 9px; border-radius: 999px;
+    border: 1px solid var(--rule-2); background: var(--card); color: var(--ink-2);
+  }
+  .chip:hover { border-color: var(--switch); color: var(--switch); }
+
+  .readout {
+    border-top: 1px solid var(--rule); padding: 13px 16px;
+    display: grid; grid-template-columns: 1fr 1fr auto; gap: 14px; align-items: center;
+  }
+  @media (max-width: 560px) {
+    .readout { grid-template-columns: 1fr 1fr; }
+    .readout .verdict { grid-column: 1 / -1; }
+  }
+  .meter .lbl {
+    font-family: var(--mono); font-size: 11px; letter-spacing: .06em;
+    display: flex; justify-content: space-between; margin-bottom: 5px;
+  }
+  .meter .lbl b { font-weight: 700; }
+  .bar-track { height: 7px; background: var(--track); border-radius: 999px; overflow: hidden; }
+  .bar-fill { height: 100%; width: 0; border-radius: 999px; transition: width .18s ease; }
+
+  .verdict {
+    font-family: var(--mono); font-size: 12px; font-weight: 700;
+    padding: 7px 13px; border-radius: 999px; text-align: center; white-space: nowrap;
+  }
+
+  /* ---------------- blocks ---------------- */
+  .card {
+    background: var(--card); border: 1px solid var(--rule-2);
+    border-radius: 12px; padding: 16px 24px; margin: 24px 0;
+  }
+  .note {
+    border-left: 3px solid var(--switch); background: var(--card);
+    padding: 16px 24px; margin: 24px 0; border-radius: 0 8px 8px 0;
+  }
+  .note.warn { border-left-color: var(--ash); }
+  .note .kicker { color: var(--switch); }
+  .note.warn .kicker { color: var(--ash); }
+
+  table { width: 100%; border-collapse: collapse; margin: 24px 0; font-size: 14.5px; }
+  th, td { text-align: left; padding: 9px 10px; border-bottom: 1px solid var(--rule); }
+  th { font-family: var(--mono); font-size: 11px; letter-spacing: .08em;
+       text-transform: uppercase; color: var(--ink-3); font-weight: 600; }
+  td.num, th.num { text-align: right; font-family: var(--mono); font-variant-numeric: tabular-nums; }
+  .tw { overflow-x: auto; }
+
+  code {
+    font-family: var(--mono); font-size: .88em;
+    background: var(--sunk); padding: 1.5px 5px; border-radius: 4px;
+  }
+  pre {
+    font-family: var(--mono); font-size: 13px; line-height: 1.6;
+    background: var(--card); border: 1px solid var(--rule-2);
+    border-radius: 10px; padding: 14px 16px; overflow-x: auto;
+  }
+  pre code { background: none; padding: 0; }
+
+  .two { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  @media (max-width: 620px) { .two { grid-template-columns: 1fr; } }
+
+  .big {
+    font-family: var(--mono); font-size: clamp(30px, 7vw, 42px);
+    font-weight: 700; letter-spacing: -.03em; line-height: 1;
+  }
+   .big.tide { color: var(--tide); }
+
+  figure { margin: 32px 0; }
+  figcaption { font-size: 13px; color: var(--ink-3); margin-top: 9px; }
+  svg { display: block; max-width: 100%; height: auto; }
+  .legend {
+    display: flex; gap: 16px; flex-wrap: wrap; font-size: 12.5px;
+    font-family: var(--mono); color: var(--ink-3); margin-bottom: 8px;
+  }
+  .legend i { width: 11px; height: 3px; border-radius: 2px; display: inline-block;
+              vertical-align: middle; margin-right: 6px; }
+
+  ul { margin: 0 0 15px; padding-left: 21px; }
+  li { margin-bottom: 7px; }
+
+  footer { padding: 40px 0 64px; border-top: 1px solid var(--rule); color: var(--ink-3); font-size: 14px; }
+
+  /* ---------------- plain / technical ---------------- */
+  [data-mode] { display: none; }
+  html[data-view="plain"] [data-mode="plain"],
+  html[data-view="expert"] [data-mode="expert"] { display: block; }
+  html[data-view="plain"] span[data-mode="plain"],
+  html[data-view="expert"] span[data-mode="expert"] { display: inline; }
+  html[data-view="plain"] li[data-mode="plain"],
+  html[data-view="expert"] li[data-mode="expert"] { display: list-item; }
+
+  .kicker {
+    font-family: var(--sans); font-size: 13.5px; font-weight: 600;
+    letter-spacing: 0; text-transform: none; color: var(--proj);
+  }
+
+  .headline-num {
+    display: flex; align-items: baseline; gap: 22px; flex-wrap: wrap;
+    margin: 24px 0 32px;
+  }
+  .headline-num .x {
+    font-size: clamp(60px, 9vw, 104px); font-weight: 700; line-height: .85;
+    letter-spacing: -.05em; color: var(--proj);
+  }
+  .headline-num p { font-size: 18px; color: var(--ink-2); max-width: 30ch; margin: 0; }
+
+  /* Failures: hanging numerals, because it is a counted list. */
+
+  /* ---------------- brand mark, stats, about, footer ---------------- */
+  .mark { font-family: "Sora", var(--sans); font-weight: 700; font-size: 17px;
+          color: var(--ink); text-decoration: none; letter-spacing: -.01em; }
+  .mark span { color: var(--proj); } /* the dot takes each project's colour */
+  .brand { margin-right: auto; font-weight: 700; }
+  .brand .sep { color: var(--rule-2); margin: 0 6px 0 2px; font-weight: 400; }
+
+  .site-foot { border-top: 2px solid var(--ink); padding: 48px 0 32px; margin-top: 0; }
+  .site-foot a { color: var(--ink); }
+  .site-foot code { background: transparent; color: inherit; padding: 0; }
+  .foot-grid { max-width: 1040px; display: grid; grid-template-columns: 2fr 1fr 1fr; gap: 32px; }
+  .foot-grid nav a { display: block; margin: 0 0 8px; text-decoration: none; opacity: .85; }
+  .foot-grid nav a:hover { opacity: 1; text-decoration: underline; }
+  .foot-h { font-weight: 700; margin-bottom: 12px; }
+  .foot-base { max-width: 1040px; margin-top: 36px; padding-top: 18px; opacity: .6;
+               border-top: 1px solid var(--rule); }
+  @media (max-width: 700px) { .foot-grid { grid-template-columns: 1fr 1fr; }
+                              .foot-grid > div:first-child { grid-column: 1 / -1; } }
+
+  /* ---------------- console layout (after LiquidAI's LFM2.5 demo) ---------------- */
+  :root { --grid: rgba(28, 25, 23, .045); --serif: "Newsreader", Georgia, serif; }
+  :root[data-theme="dark"] { --grid: rgba(255, 255, 255, .04); }
+  @media (prefers-color-scheme: dark) {
+    :root:where(:not([data-theme="light"])) { --grid: rgba(255, 255, 255, .04); }
+  }
+  body {
+    background-image: linear-gradient(var(--grid) 1px, transparent 1px),
+                      linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+    background-size: 40px 40px;
+  }
+
+  h1, h2, .display { font-weight: 500; letter-spacing: -.05em; }
+  h2 { font-size: clamp(28px, 4vw, 40px); line-height: 1.02; }
+  .it { font-family: var(--serif); font-style: italic; font-weight: 400; letter-spacing: 0; }
+  .caps { font-size: 12px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase;
+          color: var(--ink-3); margin: 0; }
+  .kicker { font-size: 12px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase;
+            color: var(--ink-3); display: flex; align-items: center; gap: 12px; }
+  .kicker::before { content: ""; width: 32px; height: 1px; background: var(--ink); }
+
+  .hero { padding: 32px 24px 64px; }
+  .console { max-width: 1360px; margin: 0 auto; border: 1px solid var(--ink); border-radius: 16px;
+             background: color-mix(in srgb, var(--paper) 88%, transparent); overflow: hidden; }
+  .console-head { display: flex; align-items: center; gap: 12px; padding: 20px 32px;
+                  border-bottom: 1px solid var(--rule); }
+  .step-no { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 999px;
+             border: 1px solid var(--rule-2); font-size: 11px; font-weight: 700; color: var(--ink-3); }
+
+  .console-body { display: grid; grid-template-columns: minmax(300px, 1fr) 2fr; }
+  .console-side { padding: 32px; border-right: 1px solid var(--rule); display: flex; flex-direction: column; }
+  .console-main { padding: 32px; min-width: 0; }
+  .lined { display: flex; align-items: center; gap: 12px; color: var(--ink); }
+  .lined::before { content: ""; width: 32px; height: 1px; background: var(--ink); }
+  .console h1 { font-size: clamp(56px, 7vw, 80px); line-height: .86; margin: 32px 0 12px; }
+  .spec { font-size: 24px; margin: 0 0 24px; }
+  .side-lede { font-size: 17px; color: var(--ink-2); margin-bottom: 24px; }
+  .specs { margin: 0 0 32px; border-top: 1px solid var(--rule); }
+  .specs div { display: flex; justify-content: space-between; gap: 16px; padding: 12px 0;
+               border-bottom: 1px solid var(--rule); font-size: 14px; }
+  .specs dt { color: var(--ink-3); }
+  .specs dd { margin: 0; font-weight: 700; text-align: right; }
+  .side-cta { margin-top: auto; }
+  .pill { display: inline-flex; align-items: center; min-height: 48px; padding: 0 24px;
+          border-radius: 999px; background: var(--ink); color: var(--paper); font-weight: 700;
+          letter-spacing: -.01em; text-decoration: none; }
+  .pill:hover { opacity: .88; }
+  .side-cta p { margin: 12px 0 0; }
+  .display { font-size: clamp(28px, 3.4vw, 44px); line-height: 1; margin: 12px 0 32px; max-width: 18ch; }
+  .display .it { letter-spacing: -.01em; }
+  .steps { list-style: none; padding: 0; margin: 0 0 32px; display: grid; grid-template-columns: repeat(3, 1fr);
+           border: 1px solid var(--rule-2); border-radius: 12px; overflow: hidden; }
+  .steps li { margin: 0; padding: 20px; font-size: 14px; color: var(--ink-3); line-height: 1.55; position: relative; }
+  .steps li + li { border-left: 1px solid var(--rule-2); }
+  .steps .it { position: absolute; top: 16px; right: 20px; color: var(--ink-3); }
+  .steps b { display: block; margin: 24px 0 6px; font-size: 17px; color: var(--ink); }
+  .try { display: flex; align-items: baseline; gap: 12px; margin-bottom: 12px; }
+  .try .it { text-transform: none; font-size: 16px; }
+  .console .scorer { border: 1px solid var(--rule-2); border-radius: 12px; }
+
+  .closing { border-top: 0; padding: 96px 24px 64px; max-width: 1360px; margin: 0 auto; }
+  .display.closing-line { font-size: clamp(36px, 4.8vw, 60px); max-width: 16ch; margin: 0; }
+  .foot-strip { display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap;
+                max-width: 1360px; margin: 40px auto 0; padding: 20px 24px 0; border-top: 1px solid var(--rule); }
+  .rail a span { font-family: var(--serif); font-style: italic; font-weight: 400; font-size: 15px; }
+
+  @media (max-width: 900px) {
+    .console-body { grid-template-columns: 1fr; }
+    .console-side { border-right: 0; border-bottom: 1px solid var(--rule); }
+    .steps { grid-template-columns: 1fr; }
+    .steps li + li { border-left: 0; border-top: 1px solid var(--rule-2); }
+    .console-head, .console-side, .console-main { padding-left: 20px; padding-right: 20px; }
+    .hero { padding: 16px 12px 48px; }
+  }
+  .bar .wrap { max-width: 1408px; padding: 0 57px; }
+  @media (max-width: 900px) { .bar .wrap { padding: 0 32px; } }
+  .foot-grid, .foot-base { max-width: 1408px; padding-left: 57px; padding-right: 57px; }
+  .foot-strip { max-width: 1408px; padding-left: 57px; padding-right: 57px; }
+  @media (max-width: 900px) { .foot-grid, .foot-base, .foot-strip { padding-left: 20px; padding-right: 20px; } }
+  @media (max-width: 560px) {
+    .bar .brand { display: none; }
+    .bar .wrap { padding: 0 12px; gap: 8px; }
+    
+  }
+
+  /* ---------------- every section is a console panel ---------------- */
+  .panel-sec { padding: 0 0 24px; border-top: 0; }
+  .panel-sec .console-side { display: block; }
+  .side-stick { position: sticky; top: 88px; }
+  .panel-sec .console-side h2 { font-size: clamp(28px, 3vw, 40px); line-height: 1.02; margin: 0; }
+  .console-main > p, .console-main > ul, .console-main > h3, .console-main > .note { max-width: 68ch; }
+  .console-main > h3:first-child, .console-main > p:first-child { margin-top: 0; }
+
+  /* cards: notes, quotes, tables and code share the steps' bordered look */
+  .note, .card, pre, .tw {
+    background: var(--card); border: 1px solid var(--rule-2); border-radius: 12px; }
+  .note { border-left: 1px solid var(--rule-2); padding: 20px 24px; }
+
+  .tw { padding: 4px 16px; }
+  .tw table { margin: 0; }
+
+  @media (max-width: 900px) {
+    .panel-sec { padding: 0 12px 16px; }
+    .side-stick { position: static; }
+  }
+
+  /* ---------------- two columns: contents rail | panels ---------------- */
+  .page-grid { max-width: 1408px; margin: 0 auto; padding: 0 24px; }
+  @media (min-width: 1100px) {
+    .page-grid { display: grid; grid-template-columns: 200px minmax(0, 1fr); gap: 32px; }
+    .page-grid > .rail {
+      display: block; position: sticky; top: 88px; align-self: start; left: auto; width: auto;
+      opacity: 1 !important; pointer-events: auto !important; font-size: 13px; line-height: 1.35;
+    }
+    .page-grid > .rail a { display: flex; gap: 12px; padding: 8px 0 8px 14px; color: var(--ink-3);
+      text-decoration: none; border-left: 1px solid var(--rule); }
+    .page-grid > .rail a:hover { color: var(--ink); }
+    .page-grid > .rail a[aria-current="true"] { color: var(--ink); font-weight: 600;
+      border-left: 2px solid var(--ink); padding-left: 13px; }
+    .page-grid > .rail a span { min-width: 1.6em; }
+  }
+  .rail-h { margin: 0 0 12px 14px; }
+  @media (max-width: 1099px) { .page-grid > .rail { display: none; } .page-grid { padding: 0 12px; } }
+
+  /* background: fine dots instead of grid lines */
+  body { background-image: radial-gradient(var(--dot) 1px, transparent 1.2px); background-size: 22px 22px; }
+  :root { --dot: rgba(28, 25, 23, .13); }
+  :root[data-theme="dark"] { --dot: rgba(255, 255, 255, .09); }
+  @media (prefers-color-scheme: dark) { :root:where(:not([data-theme="light"])) { --dot: rgba(255, 255, 255, .09); } }
+
+  /* inside each section card: title band on top, content gets the full width */
+  .panel-sec .console-body { display: block; }
+  .panel-sec .console-side { border-right: 0; border-bottom: 1px solid var(--rule); padding: 40px 48px 32px; }
+  .panel-sec .side-stick { position: static; }
+  .panel-sec .console-side h2 { font-size: clamp(26px, 2.8vw, 38px); max-width: 28ch; }
+  .panel-sec .console-main { padding: 40px 48px 48px; }
+  @media (max-width: 900px) {
+    .panel-sec .console-side { padding: 24px 20px; }
+    .panel-sec .console-main { padding: 24px 20px 32px; }
+  }
+
+  /* hero: open on the page, no frame. Oversized title, statement beside the story, then the live filter. */
+  .hero { max-width: 1408px; margin: 0 auto; padding: 48px 24px 64px; }
+  .hero .console { max-width: none; }
+  .hero .console-body { padding: 48px 48px 48px; }
+  .hero .console-head { display: none; }
+  .hero .console-body { display: grid; grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); column-gap: 64px;
+    align-items: start;
+    grid-template-areas: "kick spec" "title title" "show lede" "steps steps" "try try" "tool specs" "tool cta"; }
+  .hero .console-side, .hero .console-main { display: contents; }
+  .hero .console-main > .caps:first-child { display: none; }
+  .hero .hero-kick { grid-area: kick; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 20px; }
+  .hero .spec { grid-area: spec; justify-self: end; margin: 0; }
+  .hero h1 { grid-area: title; font-size: clamp(72px, 10vw, 144px); line-height: .82; letter-spacing: -.07em;
+    margin: 24px 0 40px; }
+  .hero .display { grid-area: show; margin: 0; max-width: 16ch; }
+  .hero .side-lede { grid-area: lede; max-width: none; margin: 8px 0 0; }
+  .hero .steps { grid-area: steps; margin: 48px 0; border: 0; border-top: 1px solid var(--ink);
+    border-bottom: 1px solid var(--rule); border-radius: 0; background: none; }
+  .hero .steps li { padding: 20px 24px 24px 0; }
+  .hero .steps li + li { border-left: 0; padding-left: 24px; }
+  .hero .steps .it { position: static; font-size: 28px; color: var(--proj); }
+  .hero .steps b { margin: 8px 0 4px; }
+  .hero .try { grid-area: try; }
+  .hero .scorer { grid-area: tool; }
+  .hero .specs { grid-area: specs; margin: 0 0 32px; }
+  .hero .side-cta { grid-area: cta; margin: 0; }
+  @media (max-width: 900px) {
+    .hero { padding: 16px 12px 48px; }
+    .hero .console-body { padding: 24px 20px 32px; }
+    .hero .console-body { grid-template-columns: minmax(0, 1fr);
+      grid-template-areas: "kick" "spec" "title" "show" "lede" "steps" "specs" "cta" "try" "tool"; }
+    .hero .spec { justify-self: start; margin-top: 8px; }
+    .hero .side-lede { margin-top: 24px; }
+    .hero .steps li, .hero .steps li + li { padding: 16px 0; }
+    .hero .side-cta { margin-bottom: 40px; }
+  }
+
+  /* footer: a plain full-width band, not a card */
+  .closing { max-width: 1408px; margin: 0 auto; padding: 96px 24px 64px; }
+  .site-foot { background: var(--paper); border-top: 1px solid var(--ink); padding: 48px 0 24px; }
+  .site-foot .foot-grid, .site-foot .foot-strip, .site-foot .foot-base {
+    max-width: 1408px; margin-left: auto; margin-right: auto; padding-left: 24px; padding-right: 24px; }
+  .site-foot .foot-strip { margin-top: 48px; padding-top: 20px; border-top: 1px solid var(--rule); }
+  .site-foot .foot-base { margin-top: 16px; padding-top: 0; }
+  @media (max-width: 900px) {
+    .closing { padding: 64px 16px 48px; }
+    .site-foot .foot-grid, .site-foot .foot-strip, .site-foot .foot-base { padding-left: 16px; padding-right: 16px; }
+  }
+
+  /* hero, compact: fits one laptop screen. Title beside the headline, story beside the live filter. */
+  .hero { padding: 16px 24px 48px; }
+  .hero .console-body { padding: 32px 40px 0; column-gap: 56px; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
+    grid-template-rows: none;
+    grid-template-areas: "kick spec" "title show" "lede try" "lede tool" "specs tool" "cta tool" "steps steps"; }
+  .hero .spec { font-size: 18px; }
+  .hero h1 { font-size: clamp(60px, 7vw, 104px); margin: 8px 0 16px; align-self: end; }
+  .hero .display { align-self: end; margin: 0 0 16px; max-width: 22ch; }
+  .hero .side-lede { font-size: 15.5px; line-height: 1.6; margin: 0 0 20px; border-top: 1px solid var(--rule); padding-top: 20px; }
+  .hero .try { margin: 0 0 12px; border-top: 1px solid var(--rule); padding-top: 20px; }
+  .hero .specs { display: grid; grid-template-columns: 1fr 1fr; column-gap: 24px; margin: 0 0 20px; }
+  .hero .specs div { padding: 8px 0; }
+  .hero .side-cta .pill { min-height: 44px; }
+  .hero .side-cta p { margin-top: 8px; }
+  .hero .steps { margin: 20px -40px 0; border-top: 1px solid var(--rule); border-bottom: 0; }
+  .hero .steps li { padding: 14px 24px 16px 40px; font-size: 13.5px; }
+  .hero .steps li + li { padding-left: 24px; border-left: 1px solid var(--rule); }
+  .hero .steps .it { font-size: 18px; margin-right: 8px; }
+  .hero .steps b { display: inline; margin: 0 0 0 0; font-size: 15px; }
+  .hero .steps b::after { content: ""; display: block; height: 4px; }
+  @media (max-width: 900px) {
+    .hero { padding: 16px 12px 40px; }
+    .hero .console-body { padding: 24px 20px 0; grid-template-columns: minmax(0, 1fr);
+      grid-template-areas: "kick" "spec" "title" "show" "lede" "specs" "cta" "try" "tool" "steps"; }
+    .hero .side-cta { margin-bottom: 28px; }
+    .hero .steps { margin: 28px -20px 0; }
+    .hero .steps li, .hero .steps li + li { padding: 14px 20px; border-left: 0; }
+  }
+
+  /* border glow, ported from the portfolio's BorderGlow: the edge nearest the pointer lights up.
+     --edge (0-100) = how close the pointer is to the edge; --angle = which side it is on. */
+  .console { position: relative; isolation: isolate; overflow: visible; --edge: 0; --angle: 45deg; }
+  .console::before, .console > .edge-light {
+    content: ""; position: absolute; border-radius: inherit; pointer-events: none;
+    opacity: calc((var(--edge) - 30) / 70); transition: opacity .25s ease-out; }
+  .console:not(:hover)::before, .console:not(:hover) > .edge-light { opacity: 0; transition: opacity .75s ease-in-out; }
+  /* the lit border: a project-colour mesh, cut to a 2px ring, then to a wedge facing the pointer */
+  .console::before { inset: -1px; padding: 2px; z-index: 2;
+    background: radial-gradient(at 80% 55%, #34c26f, transparent 50%), radial-gradient(at 8% 6%, #9be3b7, transparent 50%),
+                radial-gradient(at 51% 4%, #17703f, transparent 50%), var(--proj);
+    mask: conic-gradient(from var(--angle), #000 25%, transparent 40%, transparent 60%, #000 75%),
+          linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    mask-composite: intersect, exclude; }
+  /* the soft halo outside the border, same wedge */
+  .console > .edge-light { inset: -40px; z-index: 1;
+    mask: conic-gradient(from var(--angle), #000 2.5%, transparent 10%, transparent 90%, #000 97.5%); }
+  .console > .edge-light::before { content: ""; position: absolute; inset: 40px; border-radius: inherit;
+    box-shadow: 0 0 2px 0 rgb(23 112 63 / 60%), 0 0 8px 0 rgb(23 112 63 / 35%),
+                0 0 24px 2px rgb(23 112 63 / 20%), 0 0 48px 4px rgb(23 112 63 / 10%); }
+  @media (hover: none) { .console::before, .console > .edge-light { display: none; } }
+
+  /* the card halos reach 40px past the cards; never let that widen the page */
+  html, body { overflow-x: clip; }
+  /* interactive dot field (ported from the portfolio's ParticleField) replaces the CSS dots */
+  body { background-image: none; }
+  .dot-field { position: fixed; inset: 0; z-index: -1; pointer-events: none; }
+
+  @media (max-width: 560px) { .hero .specs { grid-template-columns: 1fr; } }
+
+  /* softer glow: lights up only close to the edge, narrower wedge, fainter halo */
+  .console::before, .console > .edge-light { opacity: calc((var(--edge) - 55) / 45 * .7); }
+  .console::before { padding: 1.5px;
+    mask: conic-gradient(from var(--angle), #000 12%, transparent 26%, transparent 74%, #000 88%),
+          linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    mask-composite: intersect, exclude; }
+  .console > .edge-light { inset: -24px;
+    mask: conic-gradient(from var(--angle), #000 1.5%, transparent 7%, transparent 93%, #000 98.5%); }
+  .console > .edge-light::before { inset: 24px;
+    box-shadow: 0 0 2px 0 rgb(23 112 63 / 35%), 0 0 8px 0 rgb(23 112 63 / 18%), 0 0 18px 1px rgb(23 112 63 / 8%); }
+
+  /* footer author block: photo beside name, one line about him, one link */
+  .author { display: flex; gap: 16px; align-items: flex-start; max-width: 420px; }
+  .author img { width: 56px; height: 56px; border-radius: 999px; object-fit: cover; flex: none;
+                border: 1px solid var(--rule-2); }
+  .author p { margin: 0; }
+  .author-name { font-weight: 700; font-size: 16px; color: var(--ink); }
+  .author-role { font-size: 14px; color: var(--ink-3); margin: 4px 0 10px !important; line-height: 1.5; }
+  .site-foot a.author-link { font-size: 14px; font-weight: 600; color: var(--ink);
+    text-decoration: underline; text-decoration-color: var(--proj); text-underline-offset: 4px; }
+  .site-foot a.author-link:hover { text-decoration-thickness: 2px; }
+
+  /* ---------------- Fix First: the leak-sweep widget ---------------- */
+  .big.proj { color: var(--proj); }
+  .chip[aria-pressed="true"] { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+  .sweep-say { padding: 17px 16px; min-height: 92px; }
+  .sweep-col { margin: 0 0 6px; font-size: 17px; }
+  .sweep-col code { font-size: 1em; font-weight: 700; background: none; padding: 0; }
+  .m-with .bar-fill { background: var(--proj); } .m-with .lbl { color: var(--proj); }
+  .m-clean .bar-fill { background: var(--tide); } .m-clean .lbl { color: var(--ink-3); }
+  .verdict.leak { background: var(--proj-w); color: var(--proj); }
+  .verdict.fine { background: var(--sunk); color: var(--ink-3); }
+  .legend i.hollow { background: none; border: 1.5px solid var(--ink); height: 9px; }
+  /* value labels get a halo in the page colour, so grid lines stop behind them */
+  .chart text.v { paint-order: stroke; stroke: var(--paper); stroke-width: 4px; stroke-linejoin: round; }
+  .tw { margin: 24px 0; }
+  /* charts keep a readable size on phones and scroll sideways inside their own box */
+  .chart { overflow-x: auto; }
+  @media (max-width: 700px) { .chart svg { min-width: 640px; }
+    figure:has(.chart) figcaption::before { content: "Swipe the chart sideways. "; font-weight: 600; } }
+
+
+  /* ---------------- the token price calculator ---------------- */
+  .calc { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; padding: 16px; }
+  .calc label { font-size: 12px; font-weight: 600; color: var(--ink-3); display: block; }
+  .calc input { width: 100%; margin-top: 6px; font: inherit; font-family: var(--mono); font-size: 15px;
+    padding: 8px 10px; border: 1px solid var(--rule-2); border-radius: 8px; background: var(--paper); color: var(--ink); }
+  .calc input:focus-visible { outline: 2px solid var(--proj); outline-offset: 1px; }
+  .calc-err { grid-column: 1 / -1; margin: 0; font-size: 13px; color: var(--proj); min-height: 1.4em; }
+  .m-right .bar-fill { background: var(--proj); } .m-right .lbl { color: var(--proj); }
+  .m-naive .bar-fill { background: var(--tide); } .m-naive .lbl { color: var(--ink-3); }
+  .verdict.fine { background: var(--sunk); color: var(--ink-3); }
+  .verdict.off { background: var(--proj-w); color: var(--proj); }
+  .calc-quota { padding: 0 16px 14px; margin: 0; font-size: 13px; color: var(--ink-3); }
+  @media (max-width: 560px) { .calc { grid-template-columns: 1fr 1fr; } }
+  .big.proj { color: var(--proj); }
+  .tw { margin: 24px 0; }
+
+</style>
+</head>
+<body>
+<canvas class="dot-field" aria-hidden="true"></canvas>
+
+<div class="bar">
+  <div class="wrap">
+    <a class="mark" href="https://johnandrei.vercel.app" aria-label="zeref. portfolio home">zeref<span>.</span></a>
+    <div class="brand"><span class="sep">/</span> Count Once</div>
+    <div class="seg" role="group" aria-label="Reading level">
+      <button type="button" id="m-plain" aria-pressed="true">Simple</button>
+      <button type="button" id="m-expert" aria-pressed="false">Technical</button>
+    </div>
+    <button type="button" class="iconbtn" id="theme" aria-label="Switch colour theme">&#9680;</button>
+  </div>
+</div>
+
+<header class="hero">
+<div class="console">
+  <div class="console-body">
+    <div class="console-side">
+      <div class="hero-kick"><p class="caps lined">FlyRank backend capstone</p></div>
+      <h1>Count Once</h1>
+      <p class="spec it">Usage Metering &amp; Billing Engine</p>
+      <p class="lede side-lede" data-mode="plain">Every paid API has to answer three questions on every request: how much has this customer used, what does it cost, and have they hit their limit. Get any of them wrong and you either lose money or bill someone twice. This backend answers all three, and keeps plans in sync with Stripe.</p>
+      <p class="lede side-lede" data-mode="expert">FastAPI and PostgreSQL. Idempotency keys checked under a per-tenant row lock with a UNIQUE backstop, quotas that answer 402 or 429 honestly, token pricing in integer micro-dollars with the cached-input and reasoning rules, and Stripe test-mode webhooks verified on the raw body and deduplicated by event id, applied by a worker with backoff retries.</p>
+      <dl class="specs">
+        <div><dt>Tests</dt><dd>30 pass</dd></div>
+        <div><dt>Acceptance probes</dt><dd>5 of 5 pass</dd></div>
+        <div><dt>Retried request</dt><dd>1 event</dd></div>
+        <div><dt>Real Stripe checkout</dt><dd>Free to Pro</dd></div>
+      </dl>
+      <div class="side-cta">
+        <a class="pill" href="https://github.com/Zeref538/Usage-Metering-and-Billing-Engine">See the code</a>
+        <p class="small muted">README, EVIDENCE.md and every run's output.</p>
+      </div>
+    </div>
+    <div class="console-main">
+      <p class="caps">What this project shows</p>
+      <p class="display">Every call counted once. <span class="it">Every refusal says why.</span></p>
+      <ol class="steps">
+        <li><span class="it">01</span><b>Lock, then decide</b>One customer's requests queue up, so a retry can never slip in twice.</li>
+        <li><span class="it">02</span><b>Integer money</b>Prices are whole micro-dollars. No floating-point pennies drifting away.</li>
+        <li><span class="it">03</span><b>Trust only signed events</b>Stripe's messages are checked before they can change a plan.</li>
+      </ol>
+      <p class="caps try">Price a request <span class="it">change the tokens</span></p>
+  <div class="scorer">
+    <div class="scorer-head">
+      <p class="small muted" style="margin:0">One request's tokens, priced in integer micro-dollars (1,000,000 = $1)</p>
+    </div>
+    <div class="calc">
+      <label>Input<input id="t-in" type="number" inputmode="numeric" min="0" step="1" value="10000"></label>
+      <label>of which cached<input id="t-cached" type="number" inputmode="numeric" min="0" step="1" value="4000"></label>
+      <label>Output<input id="t-out" type="number" inputmode="numeric" min="0" step="1" value="1500"></label>
+      <label>Reasoning<input id="t-reason" type="number" inputmode="numeric" min="0" step="1" value="2500"></label>
+      <p class="calc-err" id="calc-err" role="status"></p>
+    </div>
+    <div class="readout">
+      <div class="meter m-right">
+        <div class="lbl"><span>Priced right</span><b id="v-right"></b></div>
+        <div class="bar-track"><div class="bar-fill" id="f-right"></div></div>
+      </div>
+      <div class="meter m-naive">
+        <div class="lbl"><span>All four summed as input</span><b id="v-naive"></b></div>
+        <div class="bar-track"><div class="bar-fill" id="f-naive"></div></div>
+      </div>
+      <div class="verdict" id="calc-verdict"></div>
+    </div>
+    <p class="calc-quota" id="calc-quota"></p>
+  </div>
+    </div>
+  </div>
+</div>
+</header>
+
+<div class="page-grid">
+<nav class="rail" aria-label="Chapters"><p class="caps rail-h">Contents</p></nav>
+<main>
+
+<section class="panel-sec" id="result">
+<div class="console">
+  <div class="console-head"><span class="step-no">01</span><span class="caps">The result</span></div>
+  <div class="console-body">
+    <div class="console-side"><div class="side-stick">
+    <h2 data-mode="plain">All five acceptance probes pass</h2>
+    <h2 data-mode="expert">5 probes over HTTP, 30 tests, one real Stripe test-mode checkout</h2>
+    </div></div>
+    <div class="console-main">
+
+  <div class="headline-num">
+    <span class="x">5/5</span>
+    <p>acceptance probes from the brief pass over real HTTP, against the running stack.</p>
+  </div>
+  <div class="tw"><table>
+    <thead><tr><th>Probe</th><th>What it proved</th></tr></thead>
+    <tbody>
+      <tr><td><b>P1</b></td><td>The same request sent twice gives two identical 201s and exactly one usage event</td></tr>
+      <tr><td><b>P2</b></td><td>Call 1,000 on Free is allowed; call 1,001 is a 402 with a clear message</td></tr>
+      <tr><td><b>P3</b></td><td>A signed webhook flips the tenant Free to Pro, and the refused call now succeeds</td></tr>
+      <tr><td><b>P4</b></td><td>A forged signature is a 400 and changes nothing; a replayed event is marked duplicate</td></tr>
+      <tr><td><b>P5</b></td><td>One request costs 12,300 micro-dollars, and <code>GET /usage</code> shows the same</td></tr>
+    </tbody>
+  </table></div>
+  <p class="small muted">
+    The 30 tests run inside the API container against a separate <code>billing_test</code>
+    database: 30 passed in 1.97 s. On top of the probes, a real Stripe test-mode Checkout,
+    paid with the test card, flipped a tenant from Free to Pro.
+  </p>
+
+    </div>
+  </div>
+</div>
+</section>
+
+<section class="panel-sec" id="once">
+<div class="console">
+  <div class="console-head"><span class="step-no">02</span><span class="caps">Exactly once</span></div>
+  <div class="console-body">
+    <div class="console-side"><div class="side-stick">
+    <h2 data-mode="plain">A retried request is never billed twice</h2>
+    <h2 data-mode="expert">Idempotency keys under a per-tenant row lock, UNIQUE as the backstop</h2>
+    </div></div>
+    <div class="console-main">
+
+  <p data-mode="plain">
+    Networks drop answers. A client that never heard back sends the same request again, and
+    a careless backend bills it twice. Here every request carries a label, an idempotency
+    key. The same label with the same body gets the first answer back, word for word, and
+    nothing new is recorded. The same label with a different body is refused.
+  </p>
+  <p data-mode="expert">
+    <code>metering.record()</code> takes <code>SELECT ... FOR UPDATE</code> on the tenant row
+    for the whole decision: key lookup, quota check, insert. A replay with the same body
+    returns the stored response byte for byte with <code>Idempotent-Replayed: true</code>; a
+    different body is a 422. <code>UNIQUE (tenant_id, idempotency_key)</code> backs it up.
+    Responses are stored as <code>json</code>, not <code>jsonb</code>, because jsonb reorders
+    keys and the replay stopped being byte-identical.
+  </p>
+  <pre><code>HTTP/1.1 201 Created
+{"event_id":3008, ... "cost":{"micros":2050,"usd":"0.002050"}, ...}
+
+HTTP/1.1 201 Created
+idempotent-replayed: true
+{"event_id":3008, ... "cost":{"micros":2050,"usd":"0.002050"}, ...}</code></pre>
+  <p class="small muted">From <code>docs/curl-retry.txt</code>: the same key sent twice, the same event id back, one event stored.</p>
+
+    </div>
+  </div>
+</div>
+</section>
+
+<section class="panel-sec" id="quota">
+<div class="console">
+  <div class="console-head"><span class="step-no">03</span><span class="caps">Honest limits</span></div>
+  <div class="console-body">
+    <div class="console-side"><div class="side-stick">
+    <h2 data-mode="plain">402 when upgrading helps, 429 when it does not</h2>
+    <h2 data-mode="expert">Allowed while used + requested &le; limit; the refusal says which limit and when it resets</h2>
+    </div></div>
+    <div class="console-main">
+
+  <p>
+    Call 1,000 on the Free plan succeeds. Call 1,001 is refused, and a refused request records
+    nothing, so retrying it with the same key after upgrading works. The answer depends on
+    whether paying would help:
+  </p>
+  <div class="tw"><table>
+    <thead><tr><th>Who is over</th><th>Answer</th><th>Why</th></tr></thead>
+    <tbody>
+      <tr><td>Free plan</td><td><b>402</b> Payment Required</td><td>Upgrading fixes it</td></tr>
+      <tr><td>Pro plan</td><td><b>429</b> Too Many Requests, with <code>Retry-After</code></td><td>Nothing higher exists; wait for the reset</td></tr>
+      <tr><td>Payment failed</td><td><b>402</b> on every billable request</td><td>Fix the card first</td></tr>
+    </tbody>
+  </table></div>
+  <div class="note">
+    <p class="kicker">The real message, call 1,001</p>
+    <p style="margin:0"><code>Free plan limit reached: 1,000 of 1,000 api calls used this month. Upgrade to Pro (POST /billing/checkout) or wait for the reset at 2026-11-01T00:00:00Z.</code></p>
+  </div>
+  <div class="tw"><table>
+    <thead><tr><th>Plan</th><th class="num">API calls / month</th><th class="num">AI tokens / month</th><th class="num">Fee</th></tr></thead>
+    <tbody>
+      <tr><td>Free</td><td class="num">1,000</td><td class="num">100,000</td><td class="num">$0</td></tr>
+      <tr><td>Pro</td><td class="num">50,000</td><td class="num">5,000,000</td><td class="num">$20.00</td></tr>
+    </tbody>
+  </table></div>
+
+    </div>
+  </div>
+</div>
+</section>
+
+<section class="panel-sec" id="pricing">
+<div class="console">
+  <div class="console-head"><span class="step-no">04</span><span class="caps">Pricing tokens</span></div>
+  <div class="console-body">
+    <div class="console-side"><div class="side-stick">
+    <h2 data-mode="plain">Cached input is part of input, and reasoning is output</h2>
+    <h2 data-mode="expert">Integer micro-dollars, per-event half-up rounding, monthly total priced once</h2>
+    </div></div>
+    <div class="console-main">
+
+  <p data-mode="plain">
+    AI providers report tokens in a way that is easy to misread. The cached tokens are
+    already inside the input count, not extra. The model's hidden thinking, reasoning tokens,
+    is billed like output. Add all four numbers together and price them as input, and the
+    bill comes out at less than half of what it should be.
+  </p>
+  <p data-mode="expert">
+    Fresh input is <code>input_tokens - cached_input_tokens</code>. Reasoning is billed at the
+    output rate. One event is rounded half-up to a whole micro-dollar; the monthly figure on
+    <code>/usage</code> is priced from the month's summed counts and rounded once, so
+    per-event rounding cannot drift the total, with the per-event sum shown beside it.
+  </p>
+  <div class="tw"><table>
+    <thead><tr><th>Tokens</th><th class="num">Price per 1M</th><th class="num">Worked example</th></tr></thead>
+    <tbody>
+      <tr><td>fresh input (10,000 &minus; 4,000 cached)</td><td class="num">$0.30</td><td class="num">1,800 &micro;$</td></tr>
+      <tr><td>cached input (4,000)</td><td class="num">$0.075</td><td class="num">300 &micro;$</td></tr>
+      <tr><td>output and reasoning (1,500 + 2,500)</td><td class="num">$2.50</td><td class="num">10,000 &micro;$</td></tr>
+      <tr><td><b>tokens</b></td><td></td><td class="num"><b>12,100 &micro;$</b></td></tr>
+      <tr><td>plus the API call</td><td class="num">$0.0002 each</td><td class="num">200 &micro;$</td></tr>
+    </tbody>
+  </table></div>
+  <p>
+    Summing all four counts and pricing them as input gives 5,400 micro-dollars, less than
+    half. The token quota counts 14,000: input plus output plus reasoning, with cached counted
+    once, not twice. Probe 5 checks exactly this request end to end.
+  </p>
+
+    </div>
+  </div>
+</div>
+</section>
+
+<section class="panel-sec" id="stripe">
+<div class="console">
+  <div class="console-head"><span class="step-no">05</span><span class="caps">Stripe</span></div>
+  <div class="console-body">
+    <div class="console-side"><div class="side-stick">
+    <h2 data-mode="plain">Only signed, new events can change a plan</h2>
+    <h2 data-mode="expert">Signature verified on the raw body, deduplicated by event id, applied by a retrying worker</h2>
+    </div></div>
+    <div class="console-main">
+
+  <p data-mode="plain">
+    When someone pays, Stripe sends a message to the backend. Anyone could send a fake one,
+    and Stripe sometimes sends the same one twice. So each message is checked against a
+    shared secret before anything happens, every message id is stored once, and a
+    background worker applies it. A message that fails is retried, then raised as an alert.
+  </p>
+  <p data-mode="expert">
+    The signature is verified on the raw request body (forged: 400, nothing stored), then
+    <code>INSERT ... ON CONFLICT (event id) DO NOTHING</code> turns replays into
+    "duplicate". The worker applies events so the tenant mirrors Stripe, and an older event
+    cannot undo a newer one. Failures retry after 2, 4, 8 and 16 s; after 5 tries the event is
+    marked failed with an alert row and an ERROR log.
+  </p>
+  <p>The real test-mode run, read back from the database afterwards (ids shortened):</p>
+  <div class="tw"><table>
+    <thead><tr><th>Stripe event</th><th>Status</th><th>Note</th></tr></thead>
+    <tbody>
+      <tr><td><code>checkout.session.completed</code></td><td><b>done</b></td><td>subscription active: tenant 1 is now pro</td></tr>
+      <tr><td><code>customer.subscription.created</code></td><td>ignored</td><td>not handled; the plan flips on checkout</td></tr>
+    </tbody>
+  </table></div>
+  <p class="small muted">
+    The app refuses to start with a live key. The Pro price is created inline from
+    <code>config/pricing.json</code>, so nothing has to be set up in the Stripe dashboard first.
+  </p>
+
+    </div>
+  </div>
+</div>
+</section>
+
+<section class="panel-sec" id="limits">
+<div class="console">
+  <div class="console-head"><span class="step-no">06</span><span class="caps">What it cannot tell you</span></div>
+  <div class="console-body">
+    <div class="console-side"><div class="side-stick">
+    <h2 data-mode="plain">Built for one paid plan and one lock per customer</h2>
+    <h2 data-mode="expert">Limits, stated before anyone asks</h2>
+    </div></div>
+    <div class="console-main">
+
+  <ul>
+    <li><b>One paid plan.</b> "Any active subscription" means Pro. A second tier needs a price-to-plan map.</li>
+    <li><b>Subscriptions made outside Checkout</b> do not change a plan until their first update,
+      because <code>customer.subscription.created</code> is ignored.</li>
+    <li><b>Calendar months in UTC</b>, not per-customer billing cycles.</li>
+    <li><b>The row lock serialises each customer.</b> Fine at this scale; a very busy customer
+      would want a counter table or sharded keys.</li>
+    <li><b>Refused requests are not stored under their key</b>, unlike Stripe's own API. That
+      is on purpose, so a retry after upgrading works.</li>
+    <li><b>No invoices, proration or overage billing</b>, the brief's stretch goals.</li>
+  </ul>
+
+    </div>
+  </div>
+</div>
+</section>
+
+<section class="panel-sec" id="repro">
+<div class="console">
+  <div class="console-head"><span class="step-no">07</span><span class="caps">Run it yourself</span></div>
+  <div class="console-body">
+    <div class="console-side"><div class="side-stick">
+    <h2>Run it yourself</h2>
+    </div></div>
+    <div class="console-main">
+
+  <p>Needs only Docker. The demo keys are in <code>.env.example</code>; Stripe is optional and test mode only.</p>
+  <pre><code>git clone https://github.com/Zeref538/Usage-Metering-and-Billing-Engine
+cd Usage-Metering-and-Billing-Engine
+cp .env.example .env
+docker compose up -d --build --wait
+docker compose exec api python -m app.seed --reset
+python scripts/probes.py
+docker compose exec api python -m pytest -q</code></pre>
+  <ul>
+    <li><a href="https://github.com/Zeref538/Usage-Metering-and-Billing-Engine/blob/main/EVIDENCE.md"><b>EVIDENCE.md</b></a>: one proof per requirement in the brief</li>
+    <li><a href="https://github.com/Zeref538/Usage-Metering-and-Billing-Engine/blob/main/docs/probes-run.txt">probes-run.txt</a>: the acceptance run</li>
+    <li><a href="https://github.com/Zeref538/Usage-Metering-and-Billing-Engine/blob/main/DESIGN.md">DESIGN.md</a>: schema, locking and the webhook flow</li>
+  </ul>
+
+    </div>
+  </div>
+</div>
+</section>
+
+</main>
+</div>
+
+<section class="closing">
+  <p class="display closing-line">Retries happen. <span class="it">The bill stays the same.</span></p>
+</section>
+
+<footer class="site-foot">
+  <div class="wrap foot-grid">
+    <div>
+      <div class="author">
+        <img src="img/john.jpg" alt="" width="56" height="56">
+        <div>
+          <p class="author-name">John Andrei Martinez</p>
+          <p class="author-role">Builds and measures machine learning models and the backends that serve them. This page is one of his case studies.</p>
+          <a class="author-link" href="https://johnandrei.vercel.app">Visit my portfolio</a>
+        </div>
+      </div>
+    </div>
+    <nav aria-label="More">
+      <p class="foot-h">This project</p>
+      <a href="https://github.com/Zeref538/Usage-Metering-and-Billing-Engine">Source code</a>
+      <a href="https://github.com/Zeref538/Usage-Metering-and-Billing-Engine/blob/main/EVIDENCE.md">Evidence</a>
+      <a href="https://github.com/Zeref538/Usage-Metering-and-Billing-Engine/blob/main/DESIGN.md">Design</a>
+    </nav>
+    <nav aria-label="Elsewhere">
+      <p class="foot-h">More work</p>
+      <a href="https://zeref538.github.io/Flyrank-Machine-Learning-Engineer-Internship/">Fix First, the ML capstone</a>
+      <a href="https://github.com/Zeref538/Flyrank-Backend-AI-Engineer-Internship-Capstones">Both backend capstones</a>
+      <a href="https://github.com/Zeref538">GitHub</a>
+    </nav>
+  </div>
+  <div class="foot-strip caps"><span>Count Once case study</span><span>FastAPI &middot; PostgreSQL &middot; Stripe</span><span>FlyRank backend AI internship</span></div>
+  <div class="wrap foot-base small">Stripe in test mode only; no real money moved. Fonts: Schibsted Grotesk, Newsreader and Sora, SIL OFL.</div>
+</footer>
+
+<script>
+
+/* ---------- hero widget: price one request, the right way and the naive way ---------- */
+const P = { fresh: 0.3, cached: 0.075, out: 2.5, call: 200 };
+const ids = ["t-in", "t-cached", "t-out", "t-reason"];
+const roundHalfUp = x => Math.floor(x + 0.5);
+function price() {
+  const [inp, cached, out, reason] = ids.map(i => Number(document.getElementById(i).value));
+  const err = document.getElementById("calc-err");
+  if ([inp, cached, out, reason].some(n => !Number.isInteger(n) || n < 0)) {
+    err.textContent = "Token counts are whole numbers, 0 or more."; return;
+  }
+  if (cached > inp) { err.textContent = "Cached input is part of input, so it cannot be larger (the API answers 422)."; return; }
+  err.textContent = "";
+  const right = roundHalfUp((inp - cached) * P.fresh + cached * P.cached + (out + reason) * P.out);
+  const naive = roundHalfUp((inp + cached + out + reason) * P.fresh);
+  const max = Math.max(right, naive, 1);
+  document.getElementById("v-right").textContent = right.toLocaleString("en-US") + " µ$";
+  document.getElementById("v-naive").textContent = naive.toLocaleString("en-US") + " µ$";
+  document.getElementById("f-right").style.width = right / max * 100 + "%";
+  document.getElementById("f-naive").style.width = naive / max * 100 + "%";
+  const v = document.getElementById("calc-verdict");
+  const off = right ? Math.round((naive - right) / right * 100) : 0;
+  v.className = "verdict " + (off ? "off" : "fine");
+  v.textContent = off ? (off > 0 ? "NAIVE +" : "NAIVE ") + off + "%" : "SAME";
+  document.getElementById("calc-quota").textContent =
+    `Token quota counts ${(inp + out + reason).toLocaleString("en-US")} (cached once, reasoning included). ` +
+    `Plus ${P.call} µ$ for the call: ${(right + P.call).toLocaleString("en-US")} µ$ in total.`;
+}
+ids.forEach(i => document.getElementById(i).addEventListener("input", price));
+price();
+
+/* ---------- controls ---------- */
+const root = document.documentElement;
+function setView(v) {
+  root.dataset.view = v;
+  document.getElementById("m-plain").setAttribute("aria-pressed", v === "plain");
+  document.getElementById("m-expert").setAttribute("aria-pressed", v === "expert");
+  try { localStorage.setItem("countonce-view", v); } catch (e) {}
+}
+document.getElementById("m-plain").addEventListener("click", () => setView("plain"));
+document.getElementById("m-expert").addEventListener("click", () => setView("expert"));
+
+document.getElementById("theme").addEventListener("click", () => {
+  const dark = matchMedia("(prefers-color-scheme: dark)").matches;
+  const cur = root.dataset.theme || (dark ? "dark" : "light");
+  const next = cur === "dark" ? "light" : "dark";
+  root.dataset.theme = next;
+  try { localStorage.setItem("countonce-theme", next); } catch (e) {}
+});
+
+try {
+  const v = localStorage.getItem("countonce-view"); if (v) setView(v);
+  const t = localStorage.getItem("countonce-theme"); if (t) root.dataset.theme = t;
+} catch (e) {}
+
+// Chapter rail: built from each section's label, current one highlighted.
+(() => {
+  const rail = document.querySelector(".rail");
+  const secs = [...document.querySelectorAll("main section[id]")];
+  const links = secs.map(sec => {
+    const no = sec.querySelector(".console-head .step-no");
+    const title = sec.querySelector(".console-head .caps");
+    if (!no || !title) return null;
+    const a = document.createElement("a");
+    a.href = "#" + sec.id;
+    a.innerHTML = `<span>${no.textContent.trim()}</span>${title.textContent.trim()}`;
+    rail.appendChild(a);
+    return [sec, a];
+  }).filter(Boolean);
+  const io = new IntersectionObserver(es => es.forEach(e => {
+    if (!e.isIntersecting) return;
+    links.forEach(([sec, a]) => a.setAttribute("aria-current", sec === e.target));
+  }), { rootMargin: "-45% 0px -50% 0px" });
+  links.forEach(([sec]) => io.observe(sec));
+})();
+
+// Border glow: same maths as the portfolio's BorderGlow.jsx, one listener for every card.
+document.querySelectorAll(".console").forEach(card => {
+  card.prepend(Object.assign(document.createElement("span"), { className: "edge-light" }));
+  card.addEventListener("pointermove", e => {
+    const r = card.getBoundingClientRect();
+    const dx = e.clientX - r.left - r.width / 2, dy = e.clientY - r.top - r.height / 2;
+    // 0 at the centre, 1 on the edge, whichever edge is nearer in proportion
+    const edge = Math.min(Math.max(Math.abs(dx) / (r.width / 2), Math.abs(dy) / (r.height / 2)), 1);
+    let angle = Math.atan2(dy, dx) * 180 / Math.PI + 90;
+    if (angle < 0) angle += 360;
+    card.style.setProperty("--edge", (edge * 100).toFixed(1));
+    card.style.setProperty("--angle", angle.toFixed(1) + "deg");
+  });
+});
+
+// Dot field: a grid of dots that grow, turn the project colour and lean toward the pointer.
+// Same approach as the portfolio's ParticleField.jsx; sleeps when the pointer is still.
+(() => {
+  const canvas = document.querySelector(".dot-field");
+  const ctx = canvas.getContext("2d");
+  const dpr = Math.min(devicePixelRatio || 1, 2), GAP = 22, RADIUS = 140;
+  let dots = [], mouse = { x: -9999, y: -9999 }, raf = null, idle = 0, colours;
+  const readColours = () => {
+    const cs = getComputedStyle(document.documentElement);
+    colours = { dot: cs.getPropertyValue("--dot").trim() || "rgba(28,25,23,.13)",
+                hot: cs.getPropertyValue("--proj").trim() || "#1f5fa8" };
+  };
+  const build = () => {
+    canvas.width = innerWidth * dpr; canvas.height = innerHeight * dpr;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    dots = [];
+    for (let x = GAP / 2; x < innerWidth; x += GAP)
+      for (let y = GAP / 2; y < innerHeight; y += GAP) dots.push({ ox: x, oy: y, x, y });
+  };
+  const draw = () => {
+    ctx.clearRect(0, 0, innerWidth, innerHeight);
+    let moving = false;
+    for (const d of dots) {
+      const dx = mouse.x - d.ox, dy = mouse.y - d.oy, dist = Math.hypot(dx, dy);
+      const t = dist < RADIUS ? 1 - dist / RADIUS : 0;           // 0 far away, 1 under the pointer
+      const tx = d.ox + dx * 0.08 * t, ty = d.oy + dy * 0.08 * t;
+      d.x += (tx - d.x) * 0.2; d.y += (ty - d.y) * 0.2;
+      if (Math.abs(tx - d.x) > 0.05 || Math.abs(ty - d.y) > 0.05) moving = true;
+      const size = 2 + t * 2;
+      ctx.globalAlpha = t ? 0.35 + t * 0.65 : 1;
+      ctx.fillStyle = t ? colours.hot : colours.dot;
+      ctx.beginPath(); ctx.arc(d.x, d.y, size / 2, 0, 7); ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+    idle = mouse.x === -9999 && !moving ? idle + 1 : 0;
+    raf = idle > 30 ? null : requestAnimationFrame(draw);
+  };
+  const wake = () => { if (raf === null) raf = requestAnimationFrame(draw); };
+  readColours(); build(); draw();
+  addEventListener("resize", () => { build(); wake(); });
+  // theme switch changes the colours: re-read them
+  new MutationObserver(() => { readColours(); wake(); })
+    .observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+  if (matchMedia("(prefers-reduced-motion: reduce)").matches) return;   // static dots only
+  addEventListener("pointermove", e => { mouse.x = e.clientX; mouse.y = e.clientY; wake(); }, { passive: true });
+  document.addEventListener("pointerleave", () => { mouse.x = mouse.y = -9999; });
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) wake(); });
+})();
+</script>
+</body>
+</html>

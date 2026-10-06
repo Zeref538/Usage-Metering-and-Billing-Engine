@@ -1,5 +1,7 @@
 # Usage Metering & Billing Engine
 
+### [Read the case study →](https://zeref538.github.io/Usage-Metering-and-Billing-Engine/)
+
 The backend every SaaS needs: how much has this customer used, what does it cost, and have they hit their limit. It meters usage exactly once under retries, refuses over-quota requests with honest 402/429 answers, prices AI tokens with the real cached-input and reasoning rules in integer money, and keeps plans in sync with Stripe (test mode) through verified, deduplicated webhooks.
 
 FlyRank backend track capstone. Python, FastAPI, PostgreSQL, Stripe test mode. Design: [DESIGN.md](DESIGN.md). Proof for every requirement: [EVIDENCE.md](EVIDENCE.md).
