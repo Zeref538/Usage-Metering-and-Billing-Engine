@@ -99,7 +99,7 @@ The Pro price is created inline from `config/pricing.json` (`price_data`), so no
 
 ## Limitations
 
-- **The real Stripe Checkout run is pending.** Everything Stripe-side was proven with events signed exactly like Stripe signs them, through the real `stripe` library's verifier. A browser checkout on a real test account has not been done yet; EVIDENCE.md says so in that row.
+- **`customer.subscription.created` is ignored.** The plan flips on `checkout.session.completed` (and later `customer.subscription.updated`/`deleted`), which is enough for Checkout. A subscription created outside Checkout, in the dashboard, would not change a plan until its first update.
 - One paid plan, so "any active subscription" means Pro. A second paid tier would need a price-to-plan map.
 - Month boundaries are calendar months in UTC, not per-customer billing cycles.
 - The tenant row lock serialises metering per tenant. Fine at this scale; a very hot tenant would want a counter table or sharded keys.

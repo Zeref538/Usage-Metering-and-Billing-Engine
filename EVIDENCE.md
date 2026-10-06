@@ -66,14 +66,19 @@ One proof per requirement in Section 6 of the brief. Everything here was run on 
 
 ## Stripe integration
 
-- [ ] **Subscription checkout works end-to-end in Stripe test mode.** *Not run yet.* `POST /billing/checkout` builds the session (code in `app/main.py`), but no real test-mode Checkout has been paid through a browser, because that needs a Stripe account's test key. Probe 3 proves our side with an event signed the way Stripe signs:
+- [x] **Subscription checkout works end-to-end in Stripe test mode.**
+  Run on 6 Oct 2026 against a real Stripe test account. `POST /billing/checkout` for tenant 1 (Acme, Free) returned a `cs_test_...` session; it was paid in the browser with test card 4242 4242 4242 4242. `stripe listen` forwarded Stripe's own signed events ([docs/stripe-listen-redacted.txt](docs/stripe-listen-redacted.txt)):
   ```
-  P3 note: event signed by this script with STRIPE_WEBHOOK_SECRET (not by Stripe)
-  PASS  P3 signed webhook accepted
-  PASS  P3 worker flipped Free to Pro; /usage shows the Pro limits
-  PASS  P3 the call refused at 1,001 now succeeds
+  19:52:36   --> customer.subscription.created [evt_1UNWvAFFpnty94526WyUxaWB]
+  19:52:37  <--  [200] POST http://localhost:8000/webhooks/stripe [evt_1UNWvAFFpnty94526WyUxaWB]
+  19:52:37   --> checkout.session.completed [evt_1UNWvAFFpnty9452rtfQ080T]
+  19:52:37  <--  [200] POST http://localhost:8000/webhooks/stripe [evt_1UNWvAFFpnty9452rtfQ080T]
   ```
-  Worker log: `INFO worker evt_probe_69f200ee2edf checkout.session.completed -> done: subscription active: tenant 1 is now pro`
+  Worker log: `evt_1UNWvAFFpnty9452rtfQ080T checkout.session.completed -> done: subscription active: tenant 1 is now pro`. `GET /usage` for Acme afterwards: `plan: pro`, `api_calls limit: 50000`, `ai_tokens limit: 5000000`. Database state after: [docs/stripe-db-after.txt](docs/stripe-db-after.txt).
+
+  **A real replay, processed once:** `stripe events resend evt_1UNWvAFFpnty9452rtfQ080T` made Stripe deliver the same event again (`19:53:05 --> checkout.session.completed`, answered 200). The table still holds it once: `evt_1UNWvAFFpnty9452rtfQ080T|done|1` (status done, 1 attempt), and there is still exactly 1 subscription.
+
+  Probe 3 (`scripts/probes.py`) repeats the flip offline with a self-signed event, so it runs without a Stripe account.
 
 - [x] **Webhooks verify signatures, ignore duplicate events, and update tenant plan/status.**
   ```

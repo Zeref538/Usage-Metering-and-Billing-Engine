@@ -11,10 +11,10 @@
 - [x] docker compose up + seed from a clean volume; capstone.yaml probes run
 - [x] README, EVIDENCE.md, BUILDLOG.md, .env.example
 - [x] Public repo pushed
-- [ ] Real Stripe test-mode Checkout run, EVIDENCE.md row ticked (needs the key above)
+- [x] Real Stripe test-mode Checkout run, EVIDENCE.md row ticked (needs the key above)
 
 ## Zeref Tasks
 
-- [ ] Stripe test account + test secret key into .env, then I run the real Checkout (steps in chat)
+- [x] Stripe test account + test secret key into .env, then I run the real Checkout (steps in chat)
 
 ## In Progress

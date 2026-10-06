@@ -1,0 +1,17 @@
+﻿              id              |             type              | status  | attempts |                     note                     
+------------------------------+-------------------------------+---------+----------+----------------------------------------------
+ evt_1UNWvAFFpnty94526WyUxaWB | customer.subscription.created | ignored |        1 | customer.subscription.created is not handled
+ evt_1UNWvAFFpnty9452rtfQ080T | checkout.session.completed    | done    |        1 | subscription active: tenant 1 is now pro
+(2 rows)
+
+ tenant_id | subscription | status | plan_code 
+-----------+--------------+--------+-----------
+         1 | sub_1UNW...  | active | pro
+(1 row)
+
+ id |     name      | plan_code | billing_status |  customer   
+----+---------------+-----------+----------------+-------------
+  1 | Acme (demo)   | pro       | ok             | cus_VOJY...
+  2 | Globex (demo) | free      | ok             | 
+(2 rows)
+

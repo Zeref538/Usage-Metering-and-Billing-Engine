@@ -1,0 +1,6 @@
+2026-10-06 19:52:36   --> customer.subscription.created [evt_1UNWvAFFpnty94526WyUxaWB]
+2026-10-06 19:52:37  <--  [200] POST http://localhost:8000/webhooks/stripe [evt_1UNWvAFFpnty94526WyUxaWB]
+2026-10-06 19:52:37   --> checkout.session.completed [evt_1UNWvAFFpnty9452rtfQ080T]
+2026-10-06 19:52:37  <--  [200] POST http://localhost:8000/webhooks/stripe [evt_1UNWvAFFpnty9452rtfQ080T]
+2026-10-06 19:53:05   --> checkout.session.completed [evt_1UNWvAFFpnty9452rtfQ080T]
+2026-10-06 19:53:05  <--  [200] POST http://localhost:8000/webhooks/stripe [evt_1UNWvAFFpnty9452rtfQ080T]
