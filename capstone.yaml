@@ -1,4 +1,4 @@
-name: flyrank-capstone-metering-billing
+name: Usage-Metering-and-Billing-Engine
 setup: cp .env.example .env
 run: docker compose up -d --build --wait
 seed: docker compose exec api python -m app.seed --reset
