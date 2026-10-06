@@ -3,7 +3,7 @@ import hashlib
 from datetime import datetime
 
 from psycopg import Connection
-from psycopg.types.json import Jsonb
+from psycopg.types.json import Json, Jsonb
 
 
 def hash_key(api_key: str) -> str:
@@ -79,7 +79,7 @@ def insert_event(con: Connection, tenant_id: int, key: str, request_hash: str, t
 
 
 def save_response(con: Connection, event_id: int, body: dict) -> None:
-    con.execute("UPDATE usage_events SET response = %s WHERE id = %s", (Jsonb(body), event_id))
+    con.execute("UPDATE usage_events SET response = %s WHERE id = %s", (Json(body), event_id))
 
 
 def list_events(con: Connection, tenant_id: int, limit: int) -> list[dict]:

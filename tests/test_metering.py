@@ -30,7 +30,7 @@ def test_same_request_twice_records_one_event_and_mirrors_the_response(client, c
     first = client.post("/generate", json=BODY, headers=auth(key, "retry-me"))
     second = client.post("/generate", json=BODY, headers=auth(key, "retry-me"))
     assert first.status_code == second.status_code == 201
-    assert second.json() == first.json()
+    assert second.content == first.content          # byte for byte, not just equal data
     assert second.headers["Idempotent-Replayed"] == "true"
     assert events(con, t["id"]) == 1
 

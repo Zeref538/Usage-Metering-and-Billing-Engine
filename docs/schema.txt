@@ -1,0 +1,27 @@
+﻿               List of relations
+ Schema |       Name        | Type  |  Owner   
+--------+-------------------+-------+----------
+ public | alerts            | table | postgres
+ public | plans             | table | postgres
+ public | schema_migrations | table | postgres
+ public | stripe_events     | table | postgres
+ public | subscriptions     | table | postgres
+ public | tenants           | table | postgres
+ public | usage_events      | table | postgres
+(7 rows)
+
+                 indexname                  |                                                            indexdef                                                            
+--------------------------------------------+--------------------------------------------------------------------------------------------------------------------------------
+ stripe_events_due                          | CREATE INDEX stripe_events_due ON public.stripe_events USING btree (next_attempt_at) WHERE (status = 'pending'::text)
+ stripe_events_pkey                         | CREATE UNIQUE INDEX stripe_events_pkey ON public.stripe_events USING btree (id)
+ subscriptions_pkey                         | CREATE UNIQUE INDEX subscriptions_pkey ON public.subscriptions USING btree (id)
+ subscriptions_stripe_subscription_id_key   | CREATE UNIQUE INDEX subscriptions_stripe_subscription_id_key ON public.subscriptions USING btree (stripe_subscription_id)
+ subscriptions_tenant                       | CREATE INDEX subscriptions_tenant ON public.subscriptions USING btree (tenant_id)
+ tenants_api_key_hash_key                   | CREATE UNIQUE INDEX tenants_api_key_hash_key ON public.tenants USING btree (api_key_hash)
+ tenants_pkey                               | CREATE UNIQUE INDEX tenants_pkey ON public.tenants USING btree (id)
+ tenants_stripe_customer_id_key             | CREATE UNIQUE INDEX tenants_stripe_customer_id_key ON public.tenants USING btree (stripe_customer_id)
+ usage_events_pkey                          | CREATE UNIQUE INDEX usage_events_pkey ON public.usage_events USING btree (id)
+ usage_events_tenant_id_idempotency_key_key | CREATE UNIQUE INDEX usage_events_tenant_id_idempotency_key_key ON public.usage_events USING btree (tenant_id, idempotency_key)
+ usage_events_tenant_time                   | CREATE INDEX usage_events_tenant_time ON public.usage_events USING btree (tenant_id, created_at)
+(11 rows)
+

@@ -1,0 +1,17 @@
+﻿HTTP/1.1 201 Created
+date: Tue, 06 Oct 2026 11:11:08 GMT
+server: uvicorn
+content-length: 319
+content-type: application/json
+
+{"event_id":3008,"recorded":{"api_calls":1,"input_tokens":2000,"cached_input_tokens":0,"output_tokens":500,"reasoning_tokens":0,"quota_tokens":2500},"cost":{"micros":2050,"usd":"0.002050"},"usage_after":{"api_calls":{"used":2,"limit":1000},"ai_tokens":{"used":16500,"limit":100000}},"period_end":"2026-11-01T00:00:00Z"}
+
+
+HTTP/1.1 201 Created
+date: Tue, 06 Oct 2026 11:11:08 GMT
+server: uvicorn
+idempotent-replayed: true
+content-length: 319
+content-type: application/json
+
+{"event_id":3008,"recorded":{"api_calls":1,"input_tokens":2000,"cached_input_tokens":0,"output_tokens":500,"reasoning_tokens":0,"quota_tokens":2500},"cost":{"micros":2050,"usd":"0.002050"},"usage_after":{"api_calls":{"used":2,"limit":1000},"ai_tokens":{"used":16500,"limit":100000}},"period_end":"2026-11-01T00:00:00Z"}

@@ -1,0 +1,21 @@
+﻿probing http://localhost:8000
+
+PASS  P1 same request twice: both 201
+PASS  P1 second response mirrors the first
+PASS  P1 exactly one usage event
+      sending 998 more calls to reach exactly 999 used...
+PASS  P2 call 1,000 (exactly at the limit) is allowed
+PASS  P2 call 1,001 is 402 with a clear message
+      402 message: Free plan limit reached: 1,000 of 1,000 api calls used this month. Upgrade to Pro (POST /billing/checkout) or wait for the reset at 2026-11-01T00:00:00Z.
+      P3 note: event signed by this script with STRIPE_WEBHOOK_SECRET (not by Stripe)
+PASS  P3 signed webhook accepted
+PASS  P3 worker flipped Free to Pro; /usage shows the Pro limits
+PASS  P3 the call refused at 1,001 now succeeds
+PASS  P4 forged signature is 400
+PASS  P4 the forgery changed nothing
+PASS  P4 replaying a real event is marked duplicate (processed once)
+PASS  P5 one request: cost 12,300 micros ($0.012300)
+PASS  P5 GET /usage matches: 200 (call) + 12,100 (tokens) = 12,300
+PASS  P5 token quota counts 14,000 (cached counted once, reasoning included)
+
+all probes passed

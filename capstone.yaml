@@ -1,0 +1,26 @@
+name: flyrank-capstone-metering-billing
+setup: cp .env.example .env
+run: docker compose up -d --build --wait
+seed: docker compose exec api python -m app.seed --reset
+test: docker compose exec api python -m pytest -q
+probes: python scripts/probes.py
+base_url: http://localhost:8000
+endpoints:
+  - method: GET
+    path: /health
+  - method: POST
+    path: /generate
+    headers: [Authorization, Idempotency-Key]
+  - method: GET
+    path: /usage
+    headers: [Authorization]
+  - method: GET
+    path: /usage/events
+    headers: [Authorization]
+  - method: POST
+    path: /billing/checkout
+    headers: [Authorization]
+  - method: POST
+    path: /webhooks/stripe
+    headers: [Stripe-Signature]
+docs: http://localhost:8000/docs

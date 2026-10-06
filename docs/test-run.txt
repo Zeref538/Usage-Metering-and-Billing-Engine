@@ -1,0 +1,41 @@
+﻿
+test database: db/billing_test, migrations applied
+============================= test session starts ==============================
+platform linux -- Python 3.12.15, pytest-9.1.1, pluggy-1.6.0 -- /usr/local/bin/python
+cachedir: .pytest_cache
+rootdir: /app
+plugins: anyio-4.15.1
+collecting ... collected 30 items
+
+tests/test_metering.py::test_same_request_twice_records_one_event_and_mirrors_the_response PASSED [  3%]
+tests/test_metering.py::test_ten_simultaneous_retries_still_record_one_event PASSED [  6%]
+tests/test_metering.py::test_same_key_with_a_different_body_is_refused PASSED [ 10%]
+tests/test_metering.py::test_different_keys_are_different_requests PASSED [ 13%]
+tests/test_metering.py::test_bad_input_is_a_clean_4xx PASSED             [ 16%]
+tests/test_metering.py::test_free_plan_allows_call_1000_and_refuses_1001_with_402 PASSED [ 20%]
+tests/test_metering.py::test_pro_plan_over_its_limit_gets_429_with_retry_after PASSED [ 23%]
+tests/test_metering.py::test_token_quota_boundary_is_exact PASSED        [ 26%]
+tests/test_metering.py::test_a_failed_payment_blocks_with_402 PASSED     [ 30%]
+tests/test_metering.py::test_a_refused_request_succeeds_with_the_same_key_after_upgrading PASSED [ 33%]
+tests/test_metering.py::test_tenants_never_see_each_others_usage PASSED  [ 36%]
+tests/test_metering.py::test_usage_cost_matches_the_pinned_prices PASSED [ 40%]
+tests/test_pricing.py::test_the_pinned_constants_are_the_ones_these_tests_assume PASSED [ 43%]
+tests/test_pricing.py::test_worked_example_from_the_readme PASSED        [ 46%]
+tests/test_pricing.py::test_cached_tokens_are_cheaper_than_fresh_ones PASSED [ 50%]
+tests/test_pricing.py::test_reasoning_tokens_cost_the_same_as_output PASSED [ 53%]
+tests/test_pricing.py::test_naive_sum_of_categories_gives_the_wrong_answer PASSED [ 56%]
+tests/test_pricing.py::test_rounding_is_half_up_on_whole_micro_dollars PASSED [ 60%]
+tests/test_pricing.py::test_cached_cannot_exceed_input PASSED            [ 63%]
+tests/test_pricing.py::test_a_float_price_in_config_is_refused PASSED    [ 66%]
+tests/test_pricing.py::test_cached_price_above_input_price_is_refused PASSED [ 70%]
+tests/test_webhooks.py::test_a_forged_webhook_is_400_and_changes_nothing PASSED [ 73%]
+tests/test_webhooks.py::test_checkout_flips_free_to_pro_and_usage_shows_the_new_limits PASSED [ 76%]
+tests/test_webhooks.py::test_a_replayed_event_is_processed_once PASSED   [ 80%]
+tests/test_webhooks.py::test_cancel_drops_back_to_free_and_a_failed_payment_marks_past_due PASSED [ 83%]
+tests/test_webhooks.py::test_an_old_event_arriving_late_cannot_undo_a_newer_one PASSED [ 86%]
+tests/test_webhooks.py::test_subscription_update_before_checkout_completed_still_lands PASSED [ 90%]
+tests/test_webhooks.py::test_events_this_app_did_not_start_are_ignored PASSED [ 93%]
+tests/test_webhooks.py::test_a_failing_event_is_retried_then_alerted PASSED [ 96%]
+tests/test_webhooks.py::test_retry_waits_with_backoff PASSED             [100%]
+
+============================== 30 passed in 1.97s ==============================
