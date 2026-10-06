@@ -1,0 +1,12 @@
+{
+  "currency": "usd",
+  "unit": "micro-dollars: 1,000,000 = $1.00. Token prices are per 1,000,000 tokens.",
+  "api_call_micros": 200,
+  "input_per_mtok_micros": 300000,
+  "cached_input_per_mtok_micros": 75000,
+  "output_per_mtok_micros": 2500000,
+  "plans": {
+    "free": {"name": "Free", "api_calls": 1000, "ai_tokens": 100000, "monthly_fee_cents": 0},
+    "pro": {"name": "Pro", "api_calls": 50000, "ai_tokens": 5000000, "monthly_fee_cents": 2000}
+  }
+}
